@@ -15,7 +15,6 @@ const HEPSIJET_COMPANY_CODE = 'GORECEK';
 const HEPSIJET_ADDRESS_ID = 'osma-gorecek-773';
 const HEPSIJET_XDOCK_CODE = 'GORECEKMERKEZEFENDİ';
 
-// Tire (-) işareti eklendi:
 const BASE_URL = 'https://integration-apitest.hepsijet.com';
 
 let cachedToken = null;
@@ -49,7 +48,7 @@ async function getHepsiJetToken() {
 
   if (response.data && response.data.status === 'OK' && response.data.data?.token) {
     cachedToken = response.data.data.token;
-    tokenExpiresAt = now + 50 * 60 * 1000; // 50 dakika sakla
+    tokenExpiresAt = now + 50 * 60 * 1000; // 50 dakika geçerli tut
     console.log('[HepsiJET] Token başarıyla alındı!');
     return cachedToken;
   } else {
@@ -79,16 +78,23 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
+    // Sipariş Kodunun Başına OLDINN Eklendi (Örn: OLDINN1014)
+    const formattedOrderNo = `OLDINN${order.order_number || Date.now()}`;
+    const todayDate = new Date().toISOString().split('T')[0];
+
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
         companyAddressId: HEPSIJET_ADDRESS_ID
       },
       delivery: {
-        customerDeliveryNo: `${order.order_number || Date.now()}`,
+        customerDeliveryNo: formattedOrderNo,
+        customerOrderId: `${order.order_number || ''}`,
         deliveryType: 'STANDARD',
         productCategory: 'E-Ticaret',
-        currentXdockAbbreviationCode: HEPSIJET_XDOCK_CODE
+        currentXdockAbbreviationCode: HEPSIJET_XDOCK_CODE,
+        deliverySlotOriginal: '0',
+        deliveryDateOriginal: todayDate
       },
       recipient: {
         name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
