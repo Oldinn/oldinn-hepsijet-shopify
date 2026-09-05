@@ -23,7 +23,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
       return res.status(200).send('No shipping address');
     }
 
-    // SENİN ADRES KURGUN:
+    // KURGULADIĞIN ADRES MANTIĞI:
     // Adres 1 = Mahalle / Cadde / Sokak / No
     // Adres 2 = İlçe
     // City = İl
@@ -31,7 +31,6 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
-    // HepsiJET Dokümantasyonuna Uygun Gönderi Nesnesi
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE
@@ -58,7 +57,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
 
-    // Dokümandaki Doğru Endpoint: rest/delivery/sendDeliveryOrder
+    // Postman Dokümanındaki Doğru Endpoint Adresi:
     const hepsijetResponse = await axios.post(
       'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
       hepsijetPayload,
@@ -72,7 +71,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
     
-    // HepsiJET'ten gelen Barkod / Takip Numarası
+    // HepsiJET'ten gelen kargo takip barkod numarası
     const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
     
     if (trackingNumber && order.id) {
