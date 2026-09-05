@@ -59,12 +59,11 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden Veri]:', JSON.stringify(hepsijetPayload));
 
-    // Basic Auth Şifrelemesi
+    // Basic Auth String Oluşturma
     const authString = `${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`;
     const encodedAuth = Buffer.from(authString).toString('base64');
 
-    // DİKKAT: YENİ LOG BURADA!
-    console.log('[HepsiJET] Basic Auth ile İstek Atılıyor...');
+    console.log('[HepsiJET] Çift Header ile İstek Atılıyor...');
 
     const hepsijetResponse = await axios.post(
       'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
@@ -72,6 +71,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
       {
         headers: {
           'Authorization': `Basic ${encodedAuth}`,
+          'X-Auth-Token': encodedAuth,
           'Content-Type': 'application/json'
         }
       }
