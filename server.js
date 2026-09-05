@@ -75,10 +75,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const token = await getHepsiJetToken();
 
     const fullAddress = `${shipping.address1 || ''} ${shipping.address2 || ''}`.trim();
-    
-    // İl ve İlçe Ayrımı
     const cityName = `${shipping.province || shipping.city || ''}`.trim();
-    // İlçe bilgisi için önce address2, yoksa city kontrol edilir
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim();
     
     // Telefon temizleme
@@ -87,6 +84,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const formattedOrderNo = `OLDINN${order.order_number || Date.now()}`;
     const todayDate = new Date().toISOString().split('T')[0];
 
+    // Dokümandaki Birebir Retail TR Şeması
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -105,16 +103,19 @@ app.post('/api/shopify-order-created', async (req, res) => {
         desi: 1,
         weight: 1
       },
-      recipient: {
-        name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
+      recipientPerson: {
+        firstname: `${shipping.first_name || ''}`.trim(),
+        lastname: `${shipping.last_name || ''}`.trim(),
         phone1: cleanPhone,
-        email: order.email || 'ornek@email.com',
-        address: fullAddress,
-        city: cityName,
+        email: order.email || 'ornek@email.com'
+      },
+      recipientAddress: {
+        companyAddressId: `ADDR-${Date.now()}`,
+        country: 'Türkiye',
         cityName: cityName,
-        district: districtName,
+        townName: districtName,
         districtName: districtName,
-        townName: districtName
+        addressLine1: fullAddress
       },
       package: {
         desi: 1,
