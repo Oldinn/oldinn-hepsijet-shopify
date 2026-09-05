@@ -9,10 +9,8 @@ const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const HEPSIJET_API_TOKEN = process.env.HEPSIJET_API_TOKEN;
 const HEPSIJET_COMPANY_CODE = process.env.HEPSIJET_COMPANY_CODE;
 
-// Ana Sayfa Testi
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
 
-// Shopify Webhook Endpoint'i
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
     const order = req.body;
@@ -21,16 +19,23 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     const shipping = order.shipping_address;
     if (!shipping) {
-      console.log('Adres verisi bulunamadı.');
+      console.log('Teslimat adresi bulunamadı.');
       return res.status(200).send('No shipping address');
     }
 
+    // SENİN ADRES KURGUN:
+    // Adres 1 = Mahalle / Cadde / Sokak / No
+    // Adres 2 = İlçe
+    // City = İl
     const fullAddress = `${shipping.address1 || ''}`.trim();
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
+    // HepsiJET Dokümantasyonuna Uygun Gönderi Nesnesi
     const hepsijetPayload = {
-      company: { companyCode: HEPSIJET_COMPANY_CODE },
+      company: {
+        companyCode: HEPSIJET_COMPANY_CODE
+      },
       delivery: {
         customerDeliveryNo: `${order.order_number || Date.now()}`,
         deliveryType: 'STANDARD',
@@ -39,7 +44,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
       recipient: {
         name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
         phone1: shipping.phone || '05000000000',
-        email: order.email || '',
+        email: order.email || 'ornek@email.com',
         address: fullAddress,
         city: cityName,
         district: districtName
@@ -53,8 +58,9 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
 
+    // Dokümandaki Doğru Endpoint: rest/delivery/sendDeliveryOrder
     const hepsijetResponse = await axios.post(
-      'https://integration-apitest.hepsijet.com/rest/delivery/createDelivery',
+      'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
       hepsijetPayload,
       {
         headers: {
@@ -64,20 +70,47 @@ app.post('/api/shopify-order-created', async (req, res) => {
       }
     );
 
-    console.log('[HepsiJET Yanıtı]:', hepsijetResponse.data);
+    console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
+    
+    // HepsiJET'ten gelen Barkod / Takip Numarası
+    const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
+    
+    if (trackingNumber && order.id) {
+      console.log(`[Shopify] Takip Numarası İşleniyor: ${trackingNumber}`);
+      await updateShopifyFulfillment(order.id, trackingNumber);
+    }
+
     res.status(200).send('OK');
 
   } catch (error) {
-    console.error('[Hata Detayı]:', error.response?.data || error.message);
-    res.status(200).send('Error logged'); // Shopify re-try döngüsüne girmesin diye 200 dönüyoruz
+    console.error('[HepsiJET Hata Detayı]:', JSON.stringify(error.response?.data || error.message));
+    res.status(200).send('Handled Error');
   }
 });
 
-// Yanlış URL isteklerini yakalama
-app.use((req, res) => {
-  console.log(`[Bilinmeyen İstek Geldi] YOL: ${req.url} | METOT: ${req.method}`);
-  res.status(404).send(`Girilen path yanlış: ${req.url}`);
-});
+async function updateShopifyFulfillment(orderId, trackingNumber) {
+  try {
+    const fulfillmentOrderRes = await axios.get(
+      `https://${SHOPIFY_SHOP}/admin/api/2026-01/orders/${orderId}/fulfillment_orders.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+    const fulfillmentOrderId = fulfillmentOrderRes.data.fulfillment_orders[0].id;
+
+    await axios.post(
+      `https://${SHOPIFY_SHOP}/admin/api/2026-01/fulfillments.json`,
+      {
+        fulfillment: {
+          line_items_by_fulfillment_order: [{ fulfillment_order_id: fulfillmentOrderId }],
+          tracking_info: { number: trackingNumber, company: 'HepsiJET' }
+        }
+      },
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+    console.log('[Shopify] Sipariş kargolandı olarak güncellendi.');
+  } catch (err) {
+    console.error('[Shopify Fulfillment Hatası]:', err.response?.data || err.message);
+  }
+}
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Sunucu ${PORT} portunda aktif!`));
