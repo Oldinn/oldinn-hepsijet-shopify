@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const app = express();
 
 app.use(express.json());
@@ -78,13 +79,13 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const cityName = `${shipping.province || shipping.city || ''}`.trim();
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim();
     
-    // Telefon temizleme
+    // Telefon numarasını temizle (10-11 hane)
     const cleanPhone = (shipping.phone || '05000000000').replace(/\D/g, '');
 
     const formattedOrderNo = `OLDINN${order.order_number || Date.now()}`;
     const todayDate = new Date().toISOString().split('T')[0];
 
-    // Dokümandaki Birebir Retail TR Şeması
+    // HepsiJET Standart Temel Payload Structure
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -93,29 +94,34 @@ app.post('/api/shopify-order-created', async (req, res) => {
       delivery: {
         customerDeliveryNo: formattedOrderNo,
         customerOrderId: `${order.order_number || ''}`,
-        deliveryType: 'RETAIL',
-        productCode: 'HX_STD',
+        deliveryType: 'STANDARD',
         productCategory: 'E-Ticaret',
         currentXdockAbbreviationCode: HEPSIJET_XDOCK_CODE,
         deliverySlotOriginal: '0',
-        deliveryDateOriginal: todayDate,
-        totalParcels: 1,
-        desi: 1,
-        weight: 1
+        deliveryDateOriginal: todayDate
       },
       recipientPerson: {
-        firstname: `${shipping.first_name || ''}`.trim(),
-        lastname: `${shipping.last_name || ''}`.trim(),
+        companyCustomerId: crypto.randomUUID(),
+        firstname: `${shipping.first_name || 'Test'}`.trim(),
+        lastname: `${shipping.last_name || 'Musteri'}`.trim(),
         phone1: cleanPhone,
         email: order.email || 'ornek@email.com'
       },
       recipientAddress: {
-        companyAddressId: `ADDR-${Date.now()}`,
+        companyAddressId: crypto.randomUUID(),
         country: 'Türkiye',
         cityName: cityName,
         townName: districtName,
         districtName: districtName,
         addressLine1: fullAddress
+      },
+      recipient: {
+        name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
+        phone1: cleanPhone,
+        email: order.email || 'ornek@email.com',
+        address: fullAddress,
+        city: cityName,
+        district: districtName
       },
       package: {
         desi: 1,
@@ -126,9 +132,9 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden Veri]:', JSON.stringify(hepsijetPayload));
 
-    // Sipariş Oluşturma İsteği
+    // Sipariş Oluşturma İsteği (Barkodlu Gelişmiş Servis)
     const hepsijetResponse = await axios.post(
-      `${BASE_URL}/rest/delivery/sendDeliveryOrder`,
+      `${BASE_URL}/rest/delivery/sendDeliveryOrderEnhanced`,
       hepsijetPayload,
       {
         headers: {
