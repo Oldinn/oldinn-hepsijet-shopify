@@ -48,7 +48,7 @@ async function getHepsiJetToken() {
 
   if (response.data && response.data.status === 'OK' && response.data.data?.token) {
     cachedToken = response.data.data.token;
-    tokenExpiresAt = now + 50 * 60 * 1000; // 50 dakika geçerli tut
+    tokenExpiresAt = now + 50 * 60 * 1000;
     console.log('[HepsiJET] Token başarıyla alındı!');
     return cachedToken;
   } else {
@@ -74,14 +74,17 @@ app.post('/api/shopify-order-created', async (req, res) => {
     // Dinamik Token Al
     const token = await getHepsiJetToken();
 
-    const fullAddress = `${shipping.address1 || ''}`.trim();
-    const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
-    const cityName = `${shipping.province || shipping.city || ''}`.trim();     
+    const fullAddress = `${shipping.address1 || ''} ${shipping.address2 || ''}`.trim();
+    const districtName = `${shipping.city || ''}`.trim(); 
+    const cityName = `${shipping.province || shipping.city || ''}`.trim();
+    
+    // Telefon numarasındaki tüm boşlukları ve karakterleri temizle (Sadece rakam)
+    const cleanPhone = (shipping.phone || '05000000000').replace(/\D/g, '');
 
-    // Sipariş Kodunun Başına OLDINN Eklendi (Örn: OLDINN1014)
     const formattedOrderNo = `OLDINN${order.order_number || Date.now()}`;
     const todayDate = new Date().toISOString().split('T')[0];
 
+    // Dokümandaki Standart Veri Şeması
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -90,15 +93,19 @@ app.post('/api/shopify-order-created', async (req, res) => {
       delivery: {
         customerDeliveryNo: formattedOrderNo,
         customerOrderId: `${order.order_number || ''}`,
-        deliveryType: 'STANDARD',
+        deliveryType: 'RETAIL',
+        productCode: 'HX_STD',
         productCategory: 'E-Ticaret',
         currentXdockAbbreviationCode: HEPSIJET_XDOCK_CODE,
         deliverySlotOriginal: '0',
-        deliveryDateOriginal: todayDate
+        deliveryDateOriginal: todayDate,
+        totalParcels: 1,
+        desi: 1,
+        weight: 1
       },
       recipient: {
         name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
-        phone1: shipping.phone || '05000000000',
+        phone1: cleanPhone,
         email: order.email || 'ornek@email.com',
         address: fullAddress,
         city: cityName,
