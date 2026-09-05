@@ -6,10 +6,50 @@ app.use(express.json());
 
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const HEPSIJET_API_TOKEN = process.env.HEPSIJET_API_TOKEN;
-const HEPSIJET_COMPANY_CODE = process.env.HEPSIJET_COMPANY_CODE;
+const HEPSIJET_USERNAME = process.env.HEPSIJET_USERNAME || 'osmgrck_integration';
+const HEPSIJET_PASSWORD = process.env.HEPSIJET_PASSWORD || 'T!SO22Pz9E';
+const HEPSIJET_COMPANY_CODE = process.env.HEPSIJET_COMPANY_CODE || 'GORECEK';
 
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
+
+// HepsiJET Test Ortamından Token Alma Fonksiyonu
+async function getHepsiJetToken() {
+  try {
+    const authHeader = Buffer.from(`${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`).toString('base64');
+    
+    // 1. Yöntem: Basic Auth ile Token İsteği
+    const response = await axios.post(
+      'https://integration-apitest.hepsijet.com/rest/login',
+      {},
+      {
+        headers: {
+          'Authorization': `Basic ${authHeader}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const token = response.data?.token || response.data?.data?.token || response.data?.status;
+    if (token) return token;
+
+    throw new Error('Token yanıtı boş döndü: ' + JSON.stringify(response.data));
+  } catch (error) {
+    // 2. Yöntem: Body içerisinde kullanıcı adı/parola gönderimi (Alternatif)
+    try {
+      const response = await axios.post(
+        'https://integration-apitest.hepsijet.com/rest/login',
+        {
+          username: HEPSIJET_USERNAME,
+          password: HEPSIJET_PASSWORD
+        }
+      );
+      return response.data?.token || response.data?.data?.token;
+    } catch (err) {
+      console.error('[HepsiJET Login Hatası]:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+}
 
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
@@ -23,14 +63,16 @@ app.post('/api/shopify-order-created', async (req, res) => {
       return res.status(200).send('No shipping address');
     }
 
-    // KURGULADIĞIN ADRES MANTIĞI:
-    // Adres 1 = Mahalle / Cadde / Sokak / No
-    // Adres 2 = İlçe
-    // City = İl
     const fullAddress = `${shipping.address1 || ''}`.trim();
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
+    // 1. HepsiJET Token Al
+    console.log('[HepsiJET] Oturum açılıyor...');
+    const token = await getHepsiJetToken();
+    console.log('[HepsiJET] Oturum başarılı, Token alındı.');
+
+    // 2. Sipariş Gönderi İskeleti
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE
@@ -57,13 +99,13 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
 
-    // Postman Dokümanındaki Doğru Endpoint Adresi:
+    // 3. Siparişi HepsiJET'e Gönder
     const hepsijetResponse = await axios.post(
       'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
       hepsijetPayload,
       {
         headers: {
-          'X-Auth-Token': HEPSIJET_API_TOKEN,
+          'X-Auth-Token': token,
           'Content-Type': 'application/json'
         }
       }
@@ -71,7 +113,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
     
-    // HepsiJET'ten gelen kargo takip barkod numarası
+    // Kargo Takip Numarası (Barkod)
     const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
     
     if (trackingNumber && order.id) {
@@ -82,7 +124,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
     res.status(200).send('OK');
 
   } catch (error) {
-    console.error('[HepsiJET Hata Detayı]:', JSON.stringify(error.response?.data || error.message));
+    console.error('[Hata Detayı]:', JSON.stringify(error.response?.data || error.message));
     res.status(200).send('Handled Error');
   }
 });
