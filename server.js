@@ -6,12 +6,43 @@ app.use(express.json());
 
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+
+// HepsiJET Test Tanımları
 const HEPSIJET_USERNAME = process.env.HEPSIJET_USERNAME || 'osmgrck_integration';
 const HEPSIJET_PASSWORD = process.env.HEPSIJET_PASSWORD || 'T!SO22Pz9E';
-const HEPSIJET_COMPANY_CODE = process.env.HEPSIJET_COMPANY_CODE || 'GORECEK';
+const HEPSIJET_COMPANY_CODE = 'GORECEK';
+const HEPSIJET_ADDRESS_ID = 'osma-gorecek-773';
+const HEPSIJET_XDOCK_CODE = 'GORECEKMERKEZEFENDİ';
 
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
 
+// 1. HepsiJET Token (Oturum Açma) Fonksiyonu
+async function getHepsiJetToken() {
+  try {
+    const loginResponse = await axios.post(
+      'https://integration-apitest.hepsijet.com/rest/login',
+      {
+        username: HEPSIJET_USERNAME,
+        password: HEPSIJET_PASSWORD
+      },
+      {
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+
+    // HepsiJET'in döndüğü token bilgisi
+    const token = loginResponse.data?.data?.token || loginResponse.data?.token;
+    if (token) {
+      return token;
+    }
+    throw new Error('Token yanıtı boş: ' + JSON.stringify(loginResponse.data));
+  } catch (error) {
+    console.error('[HepsiJET Login Hatası]:', JSON.stringify(error.response?.data || error.message));
+    throw error;
+  }
+}
+
+// 2. Shopify Webhook Endpoint'i
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
     const order = req.body;
@@ -28,15 +59,22 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
-    // HepsiJET Gönderi Yapısı
+    // 1. Oturum aç ve Token al
+    console.log('[HepsiJET] Oturum açılıyor...');
+    const token = await getHepsiJetToken();
+    console.log('[HepsiJET] Oturum Başarılı! Token Alındı.');
+
+    // 2. HepsiJET Tam İskelet Yapısı
     const hepsijetPayload = {
       company: {
-        companyCode: HEPSIJET_COMPANY_CODE
+        companyCode: HEPSIJET_COMPANY_CODE,
+        companyAddressId: HEPSIJET_ADDRESS_ID
       },
       delivery: {
         customerDeliveryNo: `${order.order_number || Date.now()}`,
         deliveryType: 'STANDARD',
-        productCategory: 'E-Ticaret'
+        productCategory: 'E-Ticaret',
+        currentXdockAbbreviationCode: HEPSIJET_XDOCK_CODE
       },
       recipient: {
         name: `${shipping.first_name || ''} ${shipping.last_name || ''}`.trim(),
@@ -55,53 +93,59 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
 
-    // 1. Deneme: X-Auth-Token olarak direkt kullanıcı adını gönderelim
-    try {
-      console.log('[HepsiJET] İntibak İsteği Atılıyor (Yöntem 1)...');
-      const response = await axios.post(
-        'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
-        hepsijetPayload,
-        {
-          headers: {
-            'X-Auth-Token': HEPSIJET_USERNAME,
-            'Content-Type': 'application/json'
-          }
+    // 3. Siparişi HepsiJET'e Gönder
+    const hepsijetResponse = await axios.post(
+      'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
+      hepsijetPayload,
+      {
+        headers: {
+          'X-Auth-Token': token,
+          'Content-Type': 'application/json'
         }
-      );
-      console.log('[HepsiJET Başarılı Yanıt (Yöntem 1)]:', JSON.stringify(response.data));
-      return res.status(200).send('OK');
-    } catch (err1) {
-      console.log('[Yöntem 1 Hata]:', JSON.stringify(err1.response?.data || err1.message));
+      }
+    );
+
+    console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
+    
+    // Kargo Takip Numarası / Barkod
+    const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
+    
+    if (trackingNumber && order.id) {
+      console.log(`[Shopify] Takip Numarası İşleniyor: ${trackingNumber}`);
+      await updateShopifyFulfillment(order.id, trackingNumber);
     }
 
-    // 2. Deneme: Basic Auth (kullanıcı_adı:parola base64) formatı ile gönderim
-    try {
-      console.log('[HepsiJET] İntibak İsteği Atılıyor (Yöntem 2)...');
-      const authHeader = Buffer.from(`${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`).toString('base64');
-      const response2 = await axios.post(
-        'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
-        hepsijetPayload,
-        {
-          headers: {
-            'Authorization': `Basic ${authHeader}`,
-            'X-Auth-Token': HEPSIJET_USERNAME,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      console.log('[HepsiJET Başarılı Yanıt (Yöntem 2)]:', JSON.stringify(response2.data));
-      return res.status(200).send('OK');
-    } catch (err2) {
-      console.log('[Yöntem 2 Hata]:', JSON.stringify(err2.response?.data || err2.message));
-    }
-
-    res.status(200).send('Handled Error');
+    res.status(200).send('OK');
 
   } catch (error) {
-    console.error('[Genel Hata Detayı]:', error.message);
-    res.status(200).send('Error');
+    console.error('[Hata Detayı]:', JSON.stringify(error.response?.data || error.message));
+    res.status(200).send('Handled Error');
   }
 });
+
+async function updateShopifyFulfillment(orderId, trackingNumber) {
+  try {
+    const fulfillmentOrderRes = await axios.get(
+      `https://${SHOPIFY_SHOP}/admin/api/2026-01/orders/${orderId}/fulfillment_orders.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+    const fulfillmentOrderId = fulfillmentOrderRes.data.fulfillment_orders[0].id;
+
+    await axios.post(
+      `https://${SHOPIFY_SHOP}/admin/api/2026-01/fulfillments.json`,
+      {
+        fulfillment: {
+          line_items_by_fulfillment_order: [{ fulfillment_order_id: fulfillmentOrderId }],
+          tracking_info: { number: trackingNumber, company: 'HepsiJET' }
+        }
+      },
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+    console.log('[Shopify] Sipariş kargolandı olarak güncellendi ve takip numarası işlendi!');
+  } catch (err) {
+    console.error('[Shopify Fulfillment Hatası]:', err.response?.data || err.message);
+  }
+}
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Sunucu ${PORT} portunda aktif!`));
