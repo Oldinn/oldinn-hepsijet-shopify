@@ -12,45 +12,6 @@ const HEPSIJET_COMPANY_CODE = process.env.HEPSIJET_COMPANY_CODE || 'GORECEK';
 
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
 
-// HepsiJET Test Ortamından Token Alma Fonksiyonu
-async function getHepsiJetToken() {
-  try {
-    const authHeader = Buffer.from(`${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`).toString('base64');
-    
-    // 1. Yöntem: Basic Auth ile Token İsteği
-    const response = await axios.post(
-      'https://integration-apitest.hepsijet.com/rest/login',
-      {},
-      {
-        headers: {
-          'Authorization': `Basic ${authHeader}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const token = response.data?.token || response.data?.data?.token || response.data?.status;
-    if (token) return token;
-
-    throw new Error('Token yanıtı boş döndü: ' + JSON.stringify(response.data));
-  } catch (error) {
-    // 2. Yöntem: Body içerisinde kullanıcı adı/parola gönderimi (Alternatif)
-    try {
-      const response = await axios.post(
-        'https://integration-apitest.hepsijet.com/rest/login',
-        {
-          username: HEPSIJET_USERNAME,
-          password: HEPSIJET_PASSWORD
-        }
-      );
-      return response.data?.token || response.data?.data?.token;
-    } catch (err) {
-      console.error('[HepsiJET Login Hatası]:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-}
-
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
     const order = req.body;
@@ -67,12 +28,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
-    // 1. HepsiJET Token Al
-    console.log('[HepsiJET] Oturum açılıyor...');
-    const token = await getHepsiJetToken();
-    console.log('[HepsiJET] Oturum başarılı, Token alındı.');
-
-    // 2. Sipariş Gönderi İskeleti
+    // HepsiJET Gönderi Yapısı
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE
@@ -99,59 +55,53 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
 
-    // 3. Siparişi HepsiJET'e Gönder
-    const hepsijetResponse = await axios.post(
-      'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
-      hepsijetPayload,
-      {
-        headers: {
-          'X-Auth-Token': token,
-          'Content-Type': 'application/json'
+    // 1. Deneme: X-Auth-Token olarak direkt kullanıcı adını gönderelim
+    try {
+      console.log('[HepsiJET] İntibak İsteği Atılıyor (Yöntem 1)...');
+      const response = await axios.post(
+        'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
+        hepsijetPayload,
+        {
+          headers: {
+            'X-Auth-Token': HEPSIJET_USERNAME,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
-
-    console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
-    
-    // Kargo Takip Numarası (Barkod)
-    const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
-    
-    if (trackingNumber && order.id) {
-      console.log(`[Shopify] Takip Numarası İşleniyor: ${trackingNumber}`);
-      await updateShopifyFulfillment(order.id, trackingNumber);
+      );
+      console.log('[HepsiJET Başarılı Yanıt (Yöntem 1)]:', JSON.stringify(response.data));
+      return res.status(200).send('OK');
+    } catch (err1) {
+      console.log('[Yöntem 1 Hata]:', JSON.stringify(err1.response?.data || err1.message));
     }
 
-    res.status(200).send('OK');
+    // 2. Deneme: Basic Auth (kullanıcı_adı:parola base64) formatı ile gönderim
+    try {
+      console.log('[HepsiJET] İntibak İsteği Atılıyor (Yöntem 2)...');
+      const authHeader = Buffer.from(`${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`).toString('base64');
+      const response2 = await axios.post(
+        'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
+        hepsijetPayload,
+        {
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'X-Auth-Token': HEPSIJET_USERNAME,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      console.log('[HepsiJET Başarılı Yanıt (Yöntem 2)]:', JSON.stringify(response2.data));
+      return res.status(200).send('OK');
+    } catch (err2) {
+      console.log('[Yöntem 2 Hata]:', JSON.stringify(err2.response?.data || err2.message));
+    }
+
+    res.status(200).send('Handled Error');
 
   } catch (error) {
-    console.error('[Hata Detayı]:', JSON.stringify(error.response?.data || error.message));
-    res.status(200).send('Handled Error');
+    console.error('[Genel Hata Detayı]:', error.message);
+    res.status(200).send('Error');
   }
 });
-
-async function updateShopifyFulfillment(orderId, trackingNumber) {
-  try {
-    const fulfillmentOrderRes = await axios.get(
-      `https://${SHOPIFY_SHOP}/admin/api/2026-01/orders/${orderId}/fulfillment_orders.json`,
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-    );
-    const fulfillmentOrderId = fulfillmentOrderRes.data.fulfillment_orders[0].id;
-
-    await axios.post(
-      `https://${SHOPIFY_SHOP}/admin/api/2026-01/fulfillments.json`,
-      {
-        fulfillment: {
-          line_items_by_fulfillment_order: [{ fulfillment_order_id: fulfillmentOrderId }],
-          tracking_info: { number: trackingNumber, company: 'HepsiJET' }
-        }
-      },
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-    );
-    console.log('[Shopify] Sipariş kargolandı olarak güncellendi.');
-  } catch (err) {
-    console.error('[Shopify Fulfillment Hatası]:', err.response?.data || err.message);
-  }
-}
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Sunucu ${PORT} portunda aktif!`));
