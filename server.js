@@ -4,17 +4,63 @@ const app = express();
 
 app.use(express.json());
 
+// Ortam Değişkenleri
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
-const HEPSIJET_USERNAME = 'osmgrck_integration';
-const HEPSIJET_PASSWORD = 'T!SO22Pz9E';
+// HepsiJET Bilgileri
+const HEPSIJET_USERNAME = process.env.HEPSIJET_USERNAME || 'osmgrck_integration';
+const HEPSIJET_PASSWORD = process.env.HEPSIJET_PASSWORD || 'T!SO22Pz9E';
 const HEPSIJET_COMPANY_CODE = 'GORECEK';
 const HEPSIJET_ADDRESS_ID = 'osma-gorecek-773';
 const HEPSIJET_XDOCK_CODE = 'GORECEKMERKEZEFENDİ';
 
+const BASE_URL = 'https://integrationapitest.hepsijet.com';
+
+let cachedToken = null;
+let tokenExpiresAt = 0;
+
+// 1. HepsiJET /auth/token Servisinden Token Alma Fonksiyonu
+async function getHepsiJetToken() {
+  const now = Date.now();
+  
+  // Token önbellekte varsa ve süresi dolmadıysa tekrar kullan
+  if (cachedToken && now < tokenExpiresAt) {
+    return cachedToken;
+  }
+
+  console.log('[HepsiJET] /auth/token adresinden yeni Token alınıyor...');
+
+  const response = await axios.post(
+    `${BASE_URL}/auth/token`,
+    {
+      username: HEPSIJET_USERNAME,
+      password: HEPSIJET_PASSWORD
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Origin': 'integration',
+        'X-Client-Id': 'hj-integration',
+        'Accept': 'application/json'
+      }
+    }
+  );
+
+  if (response.data && response.data.status === 'OK' && response.data.data?.token) {
+    cachedToken = response.data.data.token;
+    // Token 60 dk geçerli, 50 dk buffer ile saklıyoruz
+    tokenExpiresAt = now + 50 * 60 * 1000; 
+    console.log('[HepsiJET] Token başarıyla alındı!');
+    return cachedToken;
+  } else {
+    throw new Error(`Token alınamadı: ${JSON.stringify(response.data)}`);
+  }
+}
+
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
 
+// 2. Shopify Webhook Endpoint'i
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
     const order = req.body;
@@ -26,6 +72,9 @@ app.post('/api/shopify-order-created', async (req, res) => {
       console.log('Teslimat adresi bulunamadı.');
       return res.status(200).send('No shipping address');
     }
+
+    // Dinamik Token Al
+    const token = await getHepsiJetToken();
 
     const fullAddress = `${shipping.address1 || ''}`.trim();
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
@@ -59,20 +108,17 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden Veri]:', JSON.stringify(hepsijetPayload));
 
-    // Basic Auth String Oluşturma
-    const authString = `${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`;
-    const encodedAuth = Buffer.from(authString).toString('base64');
-
-    console.log('[HepsiJET] Çift Header ile İstek Atılıyor...');
-
+    // Sipariş Oluşturma İsteği
     const hepsijetResponse = await axios.post(
-      'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
+      `${BASE_URL}/rest/delivery/sendDeliveryOrder`,
       hepsijetPayload,
       {
         headers: {
-          'Authorization': `Basic ${encodedAuth}`,
-          'X-Auth-Token': encodedAuth,
-          'Content-Type': 'application/json'
+          'X-Auth-Token': token,
+          'X-Origin': 'integration',
+          'X-Client-Id': 'hj-integration',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         }
       }
     );
