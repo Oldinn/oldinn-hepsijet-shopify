@@ -4,45 +4,19 @@ const app = express();
 
 app.use(express.json());
 
+// Ortam Değişkenleri
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
-// HepsiJET Test Tanımları
-const HEPSIJET_USERNAME = process.env.HEPSIJET_USERNAME || 'osmgrck_integration';
-const HEPSIJET_PASSWORD = process.env.HEPSIJET_PASSWORD || 'T!SO22Pz9E';
+// HepsiJET Test Kimlik Bilgileri (Dokümandan Doğrulandı)
+const HEPSIJET_USERNAME = 'osmgrck_integration';
+const HEPSIJET_PASSWORD = 'T!SO22Pz9E';
 const HEPSIJET_COMPANY_CODE = 'GORECEK';
 const HEPSIJET_ADDRESS_ID = 'osma-gorecek-773';
 const HEPSIJET_XDOCK_CODE = 'GORECEKMERKEZEFENDİ';
 
 app.get('/', (req, res) => res.send('HepsiJET Entegrasyonu Aktif!'));
 
-// 1. HepsiJET Token (Oturum Açma) Fonksiyonu
-async function getHepsiJetToken() {
-  try {
-    const loginResponse = await axios.post(
-      'https://integration-apitest.hepsijet.com/rest/login',
-      {
-        username: HEPSIJET_USERNAME,
-        password: HEPSIJET_PASSWORD
-      },
-      {
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-
-    // HepsiJET'in döndüğü token bilgisi
-    const token = loginResponse.data?.data?.token || loginResponse.data?.token;
-    if (token) {
-      return token;
-    }
-    throw new Error('Token yanıtı boş: ' + JSON.stringify(loginResponse.data));
-  } catch (error) {
-    console.error('[HepsiJET Login Hatası]:', JSON.stringify(error.response?.data || error.message));
-    throw error;
-  }
-}
-
-// 2. Shopify Webhook Endpoint'i
 app.post('/api/shopify-order-created', async (req, res) => {
   try {
     const order = req.body;
@@ -59,12 +33,7 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
-    // 1. Oturum aç ve Token al
-    console.log('[HepsiJET] Oturum açılıyor...');
-    const token = await getHepsiJetToken();
-    console.log('[HepsiJET] Oturum Başarılı! Token Alındı.');
-
-    // 2. HepsiJET Tam İskelet Yapısı
+    // HepsiJET İskeleti
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -91,27 +60,33 @@ app.post('/api/shopify-order-created', async (req, res) => {
       }
     };
 
-    console.log('[HepsiJET Giden İskelet]:', JSON.stringify(hepsijetPayload));
+    console.log('[HepsiJET Giden Veri]:', JSON.stringify(hepsijetPayload));
 
-    // 3. Siparişi HepsiJET'e Gönder
+    // Basic Auth Şifrelemesi (KullanıcıAdı:Parola -> Base64)
+    const authString = `${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`;
+    const encodedAuth = Buffer.from(authString).toString('base64');
+
+    console.log('[HepsiJET] Basic Auth ile İstek Atılıyor...');
+
+    // Siparişi HepsiJET'e Gönder
     const hepsijetResponse = await axios.post(
       'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
       hepsijetPayload,
       {
         headers: {
-          'X-Auth-Token': token,
+          'Authorization': `Basic ${encodedAuth}`,
           'Content-Type': 'application/json'
         }
       }
     );
 
-    console.log('[HepsiJET Başarılı Yanıt]:', JSON.stringify(hepsijetResponse.data));
+    console.log('[HepsiJET BAŞARILI YANIT]:', JSON.stringify(hepsijetResponse.data));
     
-    // Kargo Takip Numarası / Barkod
+    // Kargo Barkodunu Al ve Shopify'a Gönder
     const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
     
     if (trackingNumber && order.id) {
-      console.log(`[Shopify] Takip Numarası İşleniyor: ${trackingNumber}`);
+      console.log(`[Shopify] Kargo takip kodu işleniyor: ${trackingNumber}`);
       await updateShopifyFulfillment(order.id, trackingNumber);
     }
 
@@ -141,7 +116,7 @@ async function updateShopifyFulfillment(orderId, trackingNumber) {
       },
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
     );
-    console.log('[Shopify] Sipariş kargolandı olarak güncellendi ve takip numarası işlendi!');
+    console.log('[Shopify] Sipariş kargolandı olarak işaretlendi!');
   } catch (err) {
     console.error('[Shopify Fulfillment Hatası]:', err.response?.data || err.message);
   }
