@@ -75,16 +75,18 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const token = await getHepsiJetToken();
 
     const fullAddress = `${shipping.address1 || ''} ${shipping.address2 || ''}`.trim();
-    const districtName = `${shipping.city || ''}`.trim(); 
-    const cityName = `${shipping.province || shipping.city || ''}`.trim();
     
-    // Telefon numarasındaki tüm boşlukları ve karakterleri temizle (Sadece rakam)
+    // İl ve İlçe Ayrımı
+    const cityName = `${shipping.province || shipping.city || ''}`.trim();
+    // İlçe bilgisi için önce address2, yoksa city kontrol edilir
+    const districtName = `${shipping.address2 || shipping.city || ''}`.trim();
+    
+    // Telefon temizleme
     const cleanPhone = (shipping.phone || '05000000000').replace(/\D/g, '');
 
     const formattedOrderNo = `OLDINN${order.order_number || Date.now()}`;
     const todayDate = new Date().toISOString().split('T')[0];
 
-    // Dokümandaki Standart Veri Şeması
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -109,7 +111,10 @@ app.post('/api/shopify-order-created', async (req, res) => {
         email: order.email || 'ornek@email.com',
         address: fullAddress,
         city: cityName,
-        district: districtName
+        cityName: cityName,
+        district: districtName,
+        districtName: districtName,
+        townName: districtName
       },
       package: {
         desi: 1,
