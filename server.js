@@ -4,11 +4,9 @@ const app = express();
 
 app.use(express.json());
 
-// Ortam Değişkenleri
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
-// HepsiJET Test Kimlik Bilgileri (Dokümandan Doğrulandı)
 const HEPSIJET_USERNAME = 'osmgrck_integration';
 const HEPSIJET_PASSWORD = 'T!SO22Pz9E';
 const HEPSIJET_COMPANY_CODE = 'GORECEK';
@@ -33,7 +31,6 @@ app.post('/api/shopify-order-created', async (req, res) => {
     const districtName = `${shipping.address2 || shipping.city || ''}`.trim(); 
     const cityName = `${shipping.province || shipping.city || ''}`.trim();     
 
-    // HepsiJET İskeleti
     const hepsijetPayload = {
       company: {
         companyCode: HEPSIJET_COMPANY_CODE,
@@ -62,13 +59,13 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET Giden Veri]:', JSON.stringify(hepsijetPayload));
 
-    // Basic Auth Şifrelemesi (KullanıcıAdı:Parola -> Base64)
+    // Basic Auth Şifrelemesi
     const authString = `${HEPSIJET_USERNAME}:${HEPSIJET_PASSWORD}`;
     const encodedAuth = Buffer.from(authString).toString('base64');
 
+    // DİKKAT: YENİ LOG BURADA!
     console.log('[HepsiJET] Basic Auth ile İstek Atılıyor...');
 
-    // Siparişi HepsiJET'e Gönder
     const hepsijetResponse = await axios.post(
       'https://integration-apitest.hepsijet.com/rest/delivery/sendDeliveryOrder',
       hepsijetPayload,
@@ -82,7 +79,6 @@ app.post('/api/shopify-order-created', async (req, res) => {
 
     console.log('[HepsiJET BAŞARILI YANIT]:', JSON.stringify(hepsijetResponse.data));
     
-    // Kargo Barkodunu Al ve Shopify'a Gönder
     const trackingNumber = hepsijetResponse.data?.data?.barcode || hepsijetResponse.data?.barcode || hepsijetResponse.data?.data?.trackingNumber;
     
     if (trackingNumber && order.id) {
@@ -118,7 +114,7 @@ async function updateShopifyFulfillment(orderId, trackingNumber) {
     );
     console.log('[Shopify] Sipariş kargolandı olarak işaretlendi!');
   } catch (err) {
-    console.error('[Shopify Fulfillment Hatası]:', err.response?.data || err.message);
+    console.error('[Shopify Hatası]:', err.response?.data || err.message);
   }
 }
 
