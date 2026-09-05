@@ -15,16 +15,16 @@ const HEPSIJET_COMPANY_CODE = 'GORECEK';
 const HEPSIJET_ADDRESS_ID = 'osma-gorecek-773';
 const HEPSIJET_XDOCK_CODE = 'GORECEKMERKEZEFENDİ';
 
-const BASE_URL = 'https://integrationapitest.hepsijet.com';
+// Tire (-) işareti eklendi:
+const BASE_URL = 'https://integration-apitest.hepsijet.com';
 
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
-// 1. HepsiJET /auth/token Servisinden Token Alma Fonksiyonu
+// 1. HepsiJET /auth/token Servisinden Token Alma
 async function getHepsiJetToken() {
   const now = Date.now();
   
-  // Token önbellekte varsa ve süresi dolmadıysa tekrar kullan
   if (cachedToken && now < tokenExpiresAt) {
     return cachedToken;
   }
@@ -49,8 +49,7 @@ async function getHepsiJetToken() {
 
   if (response.data && response.data.status === 'OK' && response.data.data?.token) {
     cachedToken = response.data.data.token;
-    // Token 60 dk geçerli, 50 dk buffer ile saklıyoruz
-    tokenExpiresAt = now + 50 * 60 * 1000; 
+    tokenExpiresAt = now + 50 * 60 * 1000; // 50 dakika sakla
     console.log('[HepsiJET] Token başarıyla alındı!');
     return cachedToken;
   } else {
